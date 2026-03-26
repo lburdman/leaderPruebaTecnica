@@ -17,6 +17,7 @@ env/
 
 # Environment variables (NEVER commit)
 .env
+.env.example
 
 # pytest
 .pytest_cache/
