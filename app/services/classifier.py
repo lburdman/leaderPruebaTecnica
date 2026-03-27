@@ -8,9 +8,11 @@ import json
 import logging
 import re
 
+from pydantic import ValidationError
+
 from anthropic import Anthropic, APIError, APIStatusError
 
-from app.core.config import settings
+from app.core.config import get_settings
 from app.core.prompts import SYSTEM_PROMPT, build_user_prompt
 from app.schemas.response import ClassifyResponse
 
@@ -32,39 +34,54 @@ FALLBACK_RESPONSE = ClassifyResponse(
 
 
 def _extract_text(response) -> str:  # type: ignore[no-untyped-def]
-    """Safely extract text from an Anthropic message response.
+    """Extract and join all text blocks from an Anthropic message response.
 
-    Iterates content blocks and returns the first text block found.
-    Raises ``ValueError`` if no text block is present.
+    Iterates all content blocks, collects every text block, and joins them
+    with a newline.  Raises ``ValueError`` if no text block is found.
     """
-    for block in response.content:
-        if hasattr(block, "text") and isinstance(block.text, str):
-            return block.text
-    raise ValueError(
-        f"No text block found in Anthropic response. "
-        f"stop_reason={response.stop_reason!r}, "
-        f"content_types={[type(b).__name__ for b in response.content]}"
-    )
+    parts = [
+        block.text
+        for block in response.content
+        if hasattr(block, "text") and isinstance(block.text, str)
+    ]
+    if not parts:
+        raise ValueError(
+            f"No text block found in Anthropic response. "
+            f"stop_reason={response.stop_reason!r}, "
+            f"content_types={[type(b).__name__ for b in response.content]}"
+        )
+    return "\n".join(parts)
 
 
-def _strip_fences(text: str) -> str:
-    """Strip optional markdown code fences around JSON.
+def _extract_json(text: str) -> str:
+    """Extract the first JSON object from *text*.
 
-    Handles outputs like:
-        ```json
-        {...}
-        ```
-    and returns the inner content.  If no fences are found the original
-    string is returned unchanged.
+    Handles three common formats:
+    1. Bare JSON: ``{"key": "value"}``
+    2. Fenced JSON: ````` ```json\\n{...}\\n``` `````
+    3. JSON embedded in surrounding prose
+
+    The fence pattern is tried first (highest confidence), then a braces
+    scan that counts depth to find the exact object boundaries.
     """
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if match:
-        return match.group(1)
-    # Also handle a bare JSON object that might be surrounded by prose
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        return match.group(0)
-    return text
+    # 1. Markdown code fence (```json ... ``` or ``` ... ```)
+    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if fence_match:
+        return fence_match.group(1)
+
+    # 2. Find the JSON object by scanning for balanced braces
+    start = text.find("{")
+    if start != -1:
+        depth = 0
+        for i, ch in enumerate(text[start:], start):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : i + 1]
+
+    return text  # let json.loads raise a meaningful error
 
 
 def _call_anthropic(message: str) -> str:
@@ -72,9 +89,10 @@ def _call_anthropic(message: str) -> str:
 
     Raises ``anthropic.APIError`` on provider or network failures.
     """
-    client = Anthropic(api_key=settings.anthropic_api_key)
+    s = get_settings()
+    client = Anthropic(api_key=s.anthropic_api_key)
     response = client.messages.create(
-        model=settings.anthropic_model,
+        model=s.anthropic_model,
         max_tokens=512,
         system=SYSTEM_PROMPT,
         messages=[
@@ -86,11 +104,12 @@ def _call_anthropic(message: str) -> str:
 
 
 def _parse_and_validate(raw: str) -> ClassifyResponse:
-    """Strip fences, parse JSON, and validate against ``ClassifyResponse``.
+    """Extract JSON from *raw*, parse it, and validate against ``ClassifyResponse``.
 
-    Raises ``ValueError`` or ``json.JSONDecodeError`` if anything is wrong.
+    Raises ``json.JSONDecodeError`` if the extracted text is not valid JSON.
+    Raises ``pydantic.ValidationError`` if the JSON does not match the schema.
     """
-    cleaned = _strip_fences(raw)
+    cleaned = _extract_json(raw)
     data = json.loads(cleaned)
     return ClassifyResponse.model_validate(data)
 
@@ -100,29 +119,40 @@ def classify_message(message: str) -> ClassifyResponse:
 
     Returns a validated ``ClassifyResponse``.  Falls back to
     ``FALLBACK_RESPONSE`` on any provider error or invalid model output.
-    The fallback is always marked ``is_fallback=True`` so callers can
+    ``is_fallback=True`` is always set on the fallback so callers can
     surface a warning to the user.
     """
     try:
         raw = _call_anthropic(message)
         logger.info("Anthropic response received (%d chars)", len(raw))
         return _parse_and_validate(raw)
+
     except APIStatusError as exc:
-        # Configuration / auth / quota errors — these will not self-heal
+        # Permanent failures (bad model id, auth, quota).  Will not self-heal.
         logger.error(
-            "Anthropic API error %s (model=%r): %s",
+            "Anthropic config/auth error HTTP %s (model=%r): %s",
             exc.status_code,
-            settings.anthropic_model,
+            get_settings().anthropic_model,
             exc.message,
         )
         return FALLBACK_RESPONSE
+
     except APIError as exc:
-        # Network / transient provider errors
-        logger.error("Anthropic provider error: %s", exc)
+        # Transient network / provider errors.
+        logger.error("Anthropic network error: %s", exc)
         return FALLBACK_RESPONSE
-    except (json.JSONDecodeError, ValueError) as exc:
-        logger.warning("Invalid model output — using fallback. Detail: %s", exc)
+
+    except json.JSONDecodeError as exc:
+        logger.warning("Model output is not valid JSON — using fallback. Detail: %s", exc)
         return FALLBACK_RESPONSE
+
+    except ValidationError as exc:
+        logger.warning(
+            "Model JSON failed schema validation — using fallback. Errors: %s",
+            exc.error_count(),
+        )
+        return FALLBACK_RESPONSE
+
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Unexpected error during classification: %s", exc)
+        logger.exception("Unexpected classification error: %s", exc)
         return FALLBACK_RESPONSE

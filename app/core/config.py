@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,4 +14,12 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-haiku-4-5"
 
 
-settings = Settings()  # type: ignore[call-arg]
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Return the cached application settings.
+
+    Using a cached factory instead of a module-level singleton means:
+    - Tests can clear the cache and inject different env vars.
+    - Import of this module never fails due to missing env vars.
+    """
+    return Settings()  # type: ignore[call-arg]
