@@ -15,3 +15,4 @@ class ClassifyResponse(BaseModel):
     summary: str
     suggested_reply: str
     needs_human_review: bool
+    is_fallback: bool = False

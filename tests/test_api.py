@@ -39,6 +39,7 @@ class TestClassifyEndpoint:
         assert data["category"] == "question"
         assert data["priority"] == "low"
         assert data["needs_human_review"] is False
+        assert data["is_fallback"] is False
         assert "summary" in data
         assert "suggested_reply" in data
 
@@ -66,6 +67,7 @@ class TestClassifyEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["needs_human_review"] is True
+        assert data["is_fallback"] is True
         assert data["category"] == FALLBACK_RESPONSE.category
 
     def test_ui_home_page_returns_200(self) -> None:

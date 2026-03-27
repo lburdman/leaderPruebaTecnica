@@ -82,6 +82,16 @@
     .badge-high     { background: #fee2e2; color: #b91c1c; }
     .badge-review-yes { background: #fef3c7; color: #92400e; }
     .badge-review-no  { background: #f0fdf4; color: #166534; }
+    #fallback-warning {
+      margin-top: .75rem;
+      padding: .65rem .9rem;
+      background: #fff7ed;
+      border: 1px solid #fdba74;
+      border-radius: 6px;
+      color: #9a3412;
+      font-size: .9rem;
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -116,6 +126,10 @@
         <div class="key">Suggested reply</div>
         <div class="value" id="r-reply"></div>
       </div>
+    </div>
+    <div id="fallback-warning">
+      ⚠️ <strong>Classification unavailable.</strong>
+      The AI provider returned an error. This is a fallback response — please review manually.
     </div>
   </div>
 
@@ -177,6 +191,9 @@
       document.getElementById('r-summary').textContent = d.summary;
       document.getElementById('r-reply').textContent = d.suggested_reply;
       resultEl.style.display = 'block';
+
+      const warningEl = document.getElementById('fallback-warning');
+      warningEl.style.display = d.is_fallback ? 'block' : 'none';
     }
 
     function setBadge(id, text, cssClass) {
