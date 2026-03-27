@@ -1,7 +1,7 @@
 """
 test_api.py — FastAPI endpoint integration tests using httpx TestClient.
 
-OpenAI is mocked at the service layer so tests run offline.
+Anthropic is mocked at the service layer so tests run offline.
 """
 import json
 from unittest.mock import patch
@@ -30,7 +30,7 @@ def _raw(payload: dict) -> str:
 class TestClassifyEndpoint:
     def test_success_returns_200_and_valid_schema(self) -> None:
         with patch(
-            "app.services.classifier._call_openai", return_value=_raw(VALID_PAYLOAD)
+            "app.services.classifier._call_anthropic", return_value=_raw(VALID_PAYLOAD)
         ):
             resp = client.post("/api/classify", json={"message": "What is the price?"})
 
@@ -54,11 +54,11 @@ class TestClassifyEndpoint:
         resp = client.post("/api/classify", json={})
         assert resp.status_code == 422
 
-    def test_fallback_returned_on_openai_error(self) -> None:
-        from openai import APIConnectionError
+    def test_fallback_returned_on_anthropic_error(self) -> None:
+        from anthropic import APIConnectionError
 
         with patch(
-            "app.services.classifier._call_openai",
+            "app.services.classifier._call_anthropic",
             side_effect=APIConnectionError(request=None),  # type: ignore[arg-type]
         ):
             resp = client.post("/api/classify", json={"message": "My server is down."})

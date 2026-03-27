@@ -1,6 +1,6 @@
 # Support Ticket Classifier
 
-An AI-assisted support ticket classification tool built with FastAPI and OpenAI.  
+An AI-assisted support ticket classification tool built with FastAPI and Anthropic.  
 Receives a support message and returns a structured classification for operations teams.
 
 ---
@@ -19,7 +19,7 @@ app/
 │   ├── request.py      # ClassifyRequest (validates + strips message)
 │   └── response.py     # ClassifyResponse (Literal enums for category/priority)
 ├── services/
-│   └── classifier.py   # OpenAI call, JSON parsing, validation, fallback logic
+│   └── classifier.py   # Anthropic call, JSON parsing, validation, fallback logic
 └── ui/templates/
     └── index.html      # Minimal single-page testing UI (vanilla HTML + JS)
 tests/
@@ -33,7 +33,7 @@ tests/
 - **Thin routes** — request validation is Pydantic's job; business logic belongs in the service.  
 - **Prompts in one file** — easy to iterate the prompt without touching any other code.  
 - **Deterministic fallback** — the service never raises; callers always get a valid `ClassifyResponse`.  
-- **Provider isolation** — all OpenAI imports live in `classifier.py`; swapping providers requires touching only that file.  
+- **Provider isolation** — all Anthropic imports live in `classifier.py`; swapping providers requires touching only that file.  
 - **No database, no auth, no Docker** — the task does not require them and they would obscure the core logic.
 
 ---
@@ -44,7 +44,7 @@ tests/
 |---|---|
 | API framework | FastAPI + Uvicorn |
 | Data validation | Pydantic v2 + pydantic-settings |
-| AI provider | OpenAI Python SDK |
+| AI provider | Anthropic Python SDK |
 | UI | FastAPI / Jinja2 (plain HTML + vanilla JS) |
 | Tests | pytest + httpx TestClient |
 
@@ -71,7 +71,7 @@ pip install -r requirements.txt
 
 ```bash
 cp .env.example .env
-# Edit .env and set OPENAI_API_KEY
+# Edit .env and set ANTHROPIC_API_KEY
 ```
 
 ---
@@ -80,8 +80,8 @@ cp .env.example .env
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `OPENAI_API_KEY` | ✅ | — | Your OpenAI secret key |
-| `OPENAI_MODEL` | ❌ | `gpt-4.1-mini` | Model to use for classification |
+| `ANTHROPIC_API_KEY` | ✅ | — | Your Anthropic secret key |
+| `ANTHROPIC_MODEL` | ❌ | `claude-3-5-haiku-20241022` | Model to use for classification |
 
 ---
 
@@ -109,7 +109,7 @@ Paste a support message, click **Classify**, and the structured result will appe
 pytest
 ```
 
-All tests use mocked OpenAI calls — no API key is required to run the test suite.
+All tests use mocked Anthropic calls — no API key is required to run the test suite.
 
 ---
 
@@ -142,7 +142,7 @@ curl -X POST http://localhost:8000/api/classify \
 | Situation | Behaviour |
 |---|---|
 | Empty or whitespace-only message | `422 Unprocessable Entity` (Pydantic validation) |
-| OpenAI API / network error | `200` with deterministic fallback + `needs_human_review: true` |
+| Anthropic API / network error | `200` with deterministic fallback + `needs_human_review: true` |
 | Model returns invalid JSON | `200` with deterministic fallback + `needs_human_review: true` |
 | Model returns unknown enum value | `200` with deterministic fallback + `needs_human_review: true` |
 
@@ -154,8 +154,8 @@ The fallback is defined once as a constant in `classifier.py`.
 ## Future Improvements
 
 - **Streaming responses** — for long tickets, stream partial results to the UI.  
-- **Async OpenAI client** — replace the sync client with `AsyncOpenAI` for higher throughput under load.  
+- **Async Anthropic client** — replace the sync client with `AsyncAnthropic` for higher throughput under load.  
 - **Confidence scores** — ask the model to return a `confidence` field; use it to widen the human-review net.  
 - **Audit log** — append each classification to a append-only JSONL file for monitoring / retraining data.  
-- **Rate limiting** — add an in-process rate limiter (e.g. `slowapi`) to protect the OpenAI quota.  
+- **Rate limiting** — add an in-process rate limiter (e.g. `slowapi`) to protect the Anthropic quota.  
 - **Multi-provider** — abstract the provider behind a `ClassifierProvider` protocol to support Anthropic, Gemini, etc.
